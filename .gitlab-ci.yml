@@ -1,0 +1,51 @@
+---
+stages:
+  - sync
+
+sync-upstream:
+  image: alpine/git
+  stage: sync
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+  script:
+    - |
+      upstream="git@git.bemade.org:bemade/bemade-addons.git"
+      # Install git and ssh
+      apk add --no-cache git openssh-client bash shadow
+
+      # Set up SSH for GitHub access
+      mkdir -p ~/.ssh
+      chmod 700 ~/.ssh
+
+      # Configure SSH to not verify host keys
+      cat > ~/.ssh/config << EOF
+      Host github.com
+        StrictHostKeyChecking no
+        UserKnownHostsFile=/dev/null
+
+      Host git.bemade.org
+        StrictHostKeyChecking no
+        UserKnownHostsFile=/dev/null
+      EOF
+      chmod 600 ~/.ssh/config
+
+      # Add the SSH key - copy from the CI/CD variable
+      cp "$SSH_KEY_GITHUB" ~/.ssh/github_key
+      chmod 600 ~/.ssh/github_key
+      eval $(ssh-agent -s)
+      ssh-add ~/.ssh/github_key
+
+    - git config user.name "GitLab CI"
+    - git config user.email "it@bemade.org"
+    - git remote set-url origin git@${CI_SERVER_HOST}:${CI_PROJECT_PATH}.git
+    - git remote add upstream "$upstream" || true
+    - git fetch upstream $CI_COMMIT_REF_NAME
+    - git checkout upstream/$CI_COMMIT_REF_NAME $(ls | grep -v '^README\.md$')
+    - |
+      if ! git diff --cached --quiet || ! git diff --quiet; then
+        git commit -am "Sync with upstream/$CI_COMMIT_REF_NAME"
+        git push origin HEAD:$CI_COMMIT_REF_NAME
+      else
+        echo "No changes to commit. Done!"
+      fi
