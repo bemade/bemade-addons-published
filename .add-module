@@ -1,0 +1,9 @@
+#!/bin/bash
+
+ADDON=$1
+BRANCH="$(git branch --show-current)"
+git remote add upstream git@git.bemade.org:bemade/bemade-addons.git || true
+git fetch upstream $BRANCH
+git checkout upstream/$BRANCH -- $1/
+git commit -am "Added addon $ADDON in $BRANCH from bemade-addons git"
+git push origin $BRANCH
