@@ -1,0 +1,35 @@
+name: Sync from upstream
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+      - name: Sync from bemade-addons
+        run: |
+          git remote add upstream https://github.com/bemade/bemade-addons.git || true
+          git fetch upstream "${{ github.ref_name }}"
+          git checkout "upstream/${{ github.ref_name }}" -- $(ls | grep -v '^README\.md$')
+
+          if ! git diff --cached --quiet || ! git diff --quiet; then
+            git commit -am "Sync with upstream/${{ github.ref_name }}"
+            git push origin "HEAD:${{ github.ref_name }}"
+          else
+            echo "No changes to commit. Done!"
+          fi
