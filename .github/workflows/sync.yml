@@ -1,5 +1,7 @@
 name: Sync from upstream
 
+# Scheduled workflows only run from the default branch, so one run syncs every
+# published branch through the matrix rather than relying on per-branch runs.
 on:
   schedule:
     - cron: "0 6 * * *"
@@ -10,11 +12,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ["17.0", "18.0", "19.0"]
+    env:
+      BRANCH: ${{ matrix.branch }}
 
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: ${{ matrix.branch }}
 
       - name: Configure Git
         run: |
@@ -23,13 +31,36 @@ jobs:
 
       - name: Sync from bemade-addons
         run: |
-          git remote add upstream https://github.com/bemade/bemade-addons.git || true
-          git fetch upstream "${{ github.ref_name }}"
-          git checkout "upstream/${{ github.ref_name }}" -- $(ls | grep -v '^README\.md$')
+          git fetch --depth=1 https://github.com/bemade/bemade-addons.git "$BRANCH"
 
-          if ! git diff --cached --quiet || ! git diff --quiet; then
-            git commit -am "Sync with upstream/${{ github.ref_name }}"
-            git push origin "HEAD:${{ github.ref_name }}"
+          # Mirror each published addon exactly, so files deleted upstream are
+          # deleted here too. Only addons already published are touched.
+          shopt -s nullglob
+          for addon in */; do
+            addon="${addon%/}"
+            if git cat-file -e "FETCH_HEAD:$addon" 2>/dev/null; then
+              git rm -r -q "$addon"
+              git checkout FETCH_HEAD -- "$addon"
+            else
+              echo "::warning::$addon not found in upstream $BRANCH, left unchanged"
+            fi
+          done
+
+          if ! git diff --cached --quiet; then
+            git commit -m "Sync with upstream/$BRANCH"
+            git push origin "HEAD:$BRANCH"
           else
             echo "No changes to commit. Done!"
           fi
+
+  # GitHub disables scheduled workflows after 60 days without repository
+  # activity; re-enabling through the API resets that timer.
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Keep the schedule enabled
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/sync.yml/enable"
+        env:
+          GH_TOKEN: ${{ github.token }}
